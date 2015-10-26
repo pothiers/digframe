@@ -9,8 +9,11 @@ Resulting images will contain:
 Along the way, create a catalog containing:
 date, caption, filename
 
+TODO:
+When there is no real date, use fake for filename, but don't put in caption.
+
 EXAMPLES:
-  gen_for_df.py --help ~/Desktop/river-15 ~/Desktop/river.1024
+  gen_for_df.py -d ~/Desktop/river-15 ~/Desktop/river.1024
 
 '''
 
@@ -32,8 +35,10 @@ def get_metadata(filename):
          'caption=###%[IPTC:2:120]###, '
          'date=\\"%[EXIF:DateTimeDigitized]\\" )" "{}"')
     #!print('DBG-1: filename={}, cmd={}'.format(filename, cmd))
-    out = bytes.decode(subprocess.check_output(cmd.format(filename),
-                                               shell=True))
+    out = bytes.decode(subprocess.check_output(cmd.format(filename), shell=True))
+
+
+
     dictstr = out.replace("'","\\'").replace("###","'")
     #!print('DBG-2: out={}, dictstr={}'.format(out, dictstr))
     md = eval(dictstr)
@@ -59,7 +64,7 @@ def burn_caption(outfile, digitizedDate,
             caption = digitizedDate.strftime('%a %m/%d/%Y %M:%H:%S')
         else:
             # prepend digitized year to caption
-            caption = '[{}] {}'.format(digitizedDate.year, caption)
+            caption = '{}: {}'.format(digitizedDate.strftime('%m/%d/%y'), caption)
         
     # Burn text at bottom/center of image 
     draw = ImageDraw.Draw(im)
@@ -87,12 +92,23 @@ def write_catalog(indir, catalog_file, verbose=True):
     for root, dirs, files in os.walk(indir):
         for fname in files:
             if fname.lower().endswith('jpg'):
+                file_cnt += 1
                 infile = os.path.join(root,fname)
-                md = get_metadata(infile)
+                try:
+                    md = get_metadata(infile)
+                except Exception as ex:
+                    print('WARNING: Could not read metadata from file "{}".\n{}'
+                          .format(fname, ex))
+                    continue
+                except subprocess.CalledProcessError as cpe:
+                    print('WARNING: Could not read metadata from file "{}". \n'
+                          '  {} => {}\n  {}'
+                          .format(fname, cmd, cpe.returncode, cpe.output))
+                    continue
+
                 if verbose:
                     print('[{}] Write record for {} to {}'
                           .format(file_cnt,fname,cname))
-                    file_cnt += 1
                 write_catalog_rec(md, fname, root, catalog_file)
                 
 def burn_dir(indir, outdir, catalog_file, date_in_caption,
@@ -101,6 +117,7 @@ def burn_dir(indir, outdir, catalog_file, date_in_caption,
                       tolerance=0.01):
     goalAspect = float(target_width)/target_height
     bad_aspect_files = dict() # d[filename] => aspect
+    bad_metadata_files = set()
     file_cnt=0
 
     print('Date, Caption, File, FullPath', file=catalog_file)
@@ -114,7 +131,14 @@ def burn_dir(indir, outdir, catalog_file, date_in_caption,
                     print('[{}] Not replacing existing file: {}'
                           .format(file_cnt-1, os.path.join(outdir, xformbase)))
                     continue
-                md = get_metadata(os.path.join(root,fname))
+                try:
+                    md = get_metadata(os.path.join(root,fname))
+                except Exception as ex:
+                    print('ERROR: Could not read metadata from file "{}". SKIPPING\n{}'
+                          .format(fname, ex))
+                    bad_metadata_files.add(fname)
+                    continue
+
                 stamp = md['date'].strftime('%Y%m%dT%H%M%S')
                 newbase='{}-{}'.format(stamp, xformbase)
                 newfile=os.path.join(outdir, newbase)
@@ -148,11 +172,13 @@ def burn_dir(indir, outdir, catalog_file, date_in_caption,
                 
     # All done.  Report
     if len(bad_aspect_files) > 0:
-        print('Bad aspect in (%d) files'.format(len(bad_aspect_files)))
+        print('Bad aspect in {} files'.format(len(bad_aspect_files)))
         for f,a in bad_aspect_files.items():
-            print('  {0:.3f}\t{1:.3f}\t{}'.format(abs(a-goalAspect),a,f))
+            print('  {0:.3f}\t{1:.3f}\t{2}'.format(abs(a-goalAspect),a,f))
                 
-
+    if len(bad_metadata_files) > 0:
+        print('Bad metadata in {} files (they were skipped)'.format(len(bad_metadata_files)))
+        print('\n'.join(bad_metadata_files))
 
 ##############################################################################
 
@@ -168,15 +194,27 @@ def main():
                         help='Write modified files here.',  )
     parser.add_argument('-c', '--catalog_file', 
                         help='Output Catalog as CSV (else to STDOUT)',
-                        default='digitalframe-catalog.csv',
+                        #default=os.path.join(args.indir,'digitalframe-catalog.csv'),
                         type=argparse.FileType('w'), )
-    parser.add_argument('-d', '--date_in_caption',
+    #!parser.add_argument('-d', '--date_in_caption',
+    #!                    action='store_true',
+    #!                    help='Include the date in the caption', )
+    parser.add_argument('--no_date_in_caption',
                         action='store_true',
-                        help='Including the date in the caption', )
+                        help='Do not include the date in the caption', )
     parser.add_argument('-j', '--just_catalog',
                         action='store_true',
                         help='Only write the catalog. Do not creates images.', )
 
+    parser.add_argument('--height',
+                        type=int, default=768,
+                        help='Target output HEIGHT of images. NIX x15a is 1024x768.'
+                        )
+    parser.add_argument('--width',
+                        type=int, default=1024,
+                        help='Target output WIDTH of images. NIX x15a is 1024x768.'
+                        )
+                        
     parser.add_argument('--loglevel',      help='Kind of diagnostic output',
                         choices = ['CRTICAL','ERROR','WARNING','INFO','DEBUG'],
                         default='WARNING', )
@@ -191,12 +229,17 @@ def main():
                         datefmt='%m-%d %H:%M'
                         )
     logging.debug('Debug output is enabled!!!')
-
+    if args.catalog_file == None:
+        cfname = os.path.join(args.indir,'digitalframe-catalog.csv')
+        print('Writing catalog to: {}'.format(cfname))
+        args.catalog_file = open(cfname, 'w')
     if args.just_catalog:
         write_catalog(args.indir, args.catalog_file)
     else:
         burn_dir(args.indir, args.outdir,
-                 args.catalog_file, args.date_in_caption)
+                 args.catalog_file, not(args.no_date_in_caption),
+                 target_width=args.width,
+                 target_height=args.height   )
     print('Catalog written to: {}'.format(args.catalog_file.name))
 if __name__ == '__main__':
     main()
