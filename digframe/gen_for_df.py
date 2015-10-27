@@ -9,11 +9,17 @@ Resulting images will contain:
 Along the way, create a catalog containing:
 date, caption, filename
 
-TODO:
-When there is no real date, use fake for filename, but don't put in caption.
-
 EXAMPLES:
-  gen_for_df.py -d ~/Desktop/river-15 ~/Desktop/river.1024
+  # Screen-saver
+  gen_for_df.py --width=1920 --height=1200 ~/Desktop/wilderness ~/Desktop/wilderness.1920
+
+  # digitial frame NIX x15a 
+  gen_for_df.py ~/Desktop/river-15 ~/Desktop/river.1024
+
+TODO:
+  - Truncate and report long captions. Total max chars=148.
+    But write full captions to catalog.
+
 
 '''
 
@@ -53,12 +59,13 @@ def get_metadata(filename):
 
 def burn_caption(outfile, digitizedDate,
                  ttf='/usr/share/fonts/truetype/msttcorefonts/arialbd.ttf',
-                 caption=''):
+                 caption='',
+                 maxCapLen=148):
     #!print('EXECUTE burn_caption({}, {}, caption={}'
     #!      .format(outfile, digitizedDate,caption))
 
     im = Image.open(outfile)
-    if digitizedDate:
+    if digitizedDate and digitizedDate.year != 1900:
         if (caption == '' ):
             # use digitized date/time for caption
             caption = digitizedDate.strftime('%a %m/%d/%Y %M:%H:%S')
@@ -69,13 +76,14 @@ def burn_caption(outfile, digitizedDate,
     # Burn text at bottom/center of image 
     draw = ImageDraw.Draw(im)
     font = ImageFont.truetype(ttf,15)
-    (textW, textH) = draw.textsize(caption,font=font)
+    captxt = caption if len(caption) <= maxCapLen else caption[:maxCapLen-3]+'...'
+    (textW, textH) = draw.textsize(captxt,font=font)
 
     (width,height) = im.size
     x = max(0,int(round((width-textW)/2)) )
     y = height-textH
     draw.rectangle([0,y-4,width,height],fill='gray')
-    draw.text((x,y),caption,font=font,fill='cornsilk')
+    draw.text((x,y),captxt,font=font,fill='cornsilk')
     im.save(outfile)
 
 def write_catalog_rec(md, fname, root, catalog_file):
@@ -172,7 +180,10 @@ def burn_dir(indir, outdir, catalog_file, date_in_caption,
                 
     # All done.  Report
     if len(bad_aspect_files) > 0:
-        print('Bad aspect in {} files'.format(len(bad_aspect_files)))
+        print('Bad aspect in {} files. All written anyhow. '
+              'Goal aspect={} tolerance={}'
+              .format(len(bad_aspect_files), goalAspect, tolerance))
+        print('Diff\tAct\tFilename')
         for f,a in bad_aspect_files.items():
             print('  {0:.3f}\t{1:.3f}\t{2}'.format(abs(a-goalAspect),a,f))
                 
@@ -195,7 +206,7 @@ def main():
     parser.add_argument('-c', '--catalog_file', 
                         help='Output Catalog as CSV (else to STDOUT)',
                         #default=os.path.join(args.indir,'digitalframe-catalog.csv'),
-                        type=argparse.FileType('w'), )
+                        type=argparse.FileType('w+'), )
     #!parser.add_argument('-d', '--date_in_caption',
     #!                    action='store_true',
     #!                    help='Include the date in the caption', )
@@ -230,9 +241,9 @@ def main():
                         )
     logging.debug('Debug output is enabled!!!')
     if args.catalog_file == None:
-        cfname = os.path.join(args.indir,'digitalframe-catalog.csv')
+        cfname = os.path.join(args.outdir,'digitalframe-catalog.csv')
         print('Writing catalog to: {}'.format(cfname))
-        args.catalog_file = open(cfname, 'w')
+        args.catalog_file = open(cfname, 'w+')
     if args.just_catalog:
         write_catalog(args.indir, args.catalog_file)
     else:
