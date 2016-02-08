@@ -1,5 +1,5 @@
 df_env/
-env_digframe/
+env_digframe
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -9,8 +9,8 @@ __pycache__/
 *.so
 
 # Distribution / packaging
-.Python
-env/
+.Pythone
+nv/
 build/
 develop-eggs/
 dist/
