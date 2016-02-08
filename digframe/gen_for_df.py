@@ -10,7 +10,7 @@ Along the way, create a catalog containing:
 date, caption, filename
 
 EXAMPLES:
-  # Screen-saver
+  # Screen-saver (16:10)
   gen_for_df.py --width=1920 --height=1200 ~/Desktop/wilderness ~/Desktop/wilderness.1920
 
   # digitial frame NIX x15a 
